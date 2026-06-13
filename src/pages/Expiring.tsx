@@ -1,8 +1,21 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useStore, getIngredientById } from '@/store/useStore';
+import { useStore } from '@/store/useStore';
 import { Link } from 'react-router-dom';
-import { CalendarDays, AlertTriangle, Clock, Sparkles, ChefHat, Trash2, Carrot } from 'lucide-react';
+import {
+  CalendarDays,
+  AlertTriangle,
+  Clock,
+  Sparkles,
+  ChefHat,
+  Trash2,
+  Carrot,
+  Bell,
+  BellOff,
+  Settings,
+} from 'lucide-react';
 import type { StockIngredientWithStatus, ExpiryStatus } from '@/types';
+import { useNotification } from '@/hooks/useNotification';
+import { useState } from 'react';
 
 const statusConfig: Record<ExpiryStatus, { label: string; chipClass: string; barClass: string; bgClass: string; text: string }> = {
   expired: {
@@ -37,6 +50,8 @@ const statusConfig: Record<ExpiryStatus, { label: string; chipClass: string; bar
 
 export function Expiring() {
   const { getStockWithStatus, getStockByStatus, removeStockIngredient, getMatchedRecipes } = useStore();
+  const { permissionState, requestPermission, dismissPrompt, shouldShowPrompt, shouldShowGuideBar, refreshPermissionState } = useNotification();
+  const [showPromptDialog, setShowPromptDialog] = useState(shouldShowPrompt);
 
   const allStock = getStockWithStatus();
   const { urgent, warning, fresh, expired } = getStockByStatus();
@@ -46,6 +61,24 @@ export function Expiring() {
     return matchedRecipes
       .filter((r) => r.matchedIngredients.includes(item.id))
       .sort((a, b) => b.matchPercentage - a.matchPercentage)[0];
+  };
+
+  const handleAllowClick = async () => {
+    setShowPromptDialog(false);
+    await requestPermission();
+  };
+
+  const handleNotNow = () => {
+    setShowPromptDialog(false);
+    dismissPrompt();
+  };
+
+  const handleGuideBarClick = async () => {
+    if (permissionState === 'dismissed') {
+      await requestPermission();
+    } else {
+      refreshPermissionState();
+    }
   };
 
   const renderSection = (title: string, emoji: string, items: StockIngredientWithStatus[], showRecipes = false) => {
@@ -86,6 +119,150 @@ export function Expiring() {
   return (
     <div className="min-h-screen pb-28">
       <div className="max-w-lg mx-auto px-4 pt-8">
+        <AnimatePresence>
+          {shouldShowGuideBar && (
+            <motion.div
+              key="guide-bar"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mb-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 p-[1.5px]"
+            >
+              <div className="rounded-2xl bg-white px-4 py-3 flex items-start gap-3">
+                <div className="flex-shrink-0 mt-0.5">
+                  <Bell size={18} className="text-indigo-500" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-800 mb-0.5">开启桌面通知，食材快过期时提醒你</p>
+                  <p className="text-xs text-gray-500">
+                    {permissionState === 'denied'
+                      ? '已被浏览器禁用，点击「去设置」在浏览器中开启通知权限'
+                      : '不打开应用也能收到提醒，再也不怕食材放坏啦'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleGuideBarClick}
+                  className="flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-600 text-xs font-medium hover:bg-indigo-100 transition-colors"
+                >
+                  {permissionState === 'denied' ? (
+                    <>
+                      <Settings size={12} />
+                      去设置
+                    </>
+                  ) : (
+                    <>
+                      <Bell size={12} />
+                      开启
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {permissionState === 'granted' && (
+            <motion.div
+              key="granted-bar"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-100 px-4 py-3 flex items-center gap-3"
+            >
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                <Bell size={16} className="text-emerald-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-emerald-800">通知已开启</p>
+                <p className="text-xs text-emerald-600/80">食材进入紧急状态时会第一时间提醒你～</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showPromptDialog && (
+            <motion.div
+              key="permission-dialog-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center px-6 bg-black/40 backdrop-blur-sm"
+            >
+              <motion.div
+                key="permission-dialog"
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+              >
+                <div className="relative bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 px-6 pt-8 pb-10 text-center">
+                  <motion.div
+                    animate={{ y: [0, -6, 0] }}
+                    transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
+                    className="w-20 h-20 mx-auto mb-4 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
+                  >
+                    <Bell size={40} className="text-white" />
+                  </motion.div>
+                  <h3 className="font-display text-2xl text-white mb-2">开启临期提醒</h3>
+                  <p className="text-sm text-white/85 leading-relaxed">
+                    食材进入紧急状态时<br />桌面自动推送通知，再也不怕放坏了
+                  </p>
+                </div>
+
+                <div className="px-6 py-5 space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-red-50 flex-shrink-0 flex items-center justify-center mt-0.5">
+                        <span className="text-xs">🍳</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">食材名 + 剩余天数</p>
+                        <p className="text-xs text-gray-500 mt-0.5">一眼就知道哪样快过期了</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 flex-shrink-0 flex items-center justify-center mt-0.5">
+                        <span className="text-xs">🔔</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">点击直达临期页</p>
+                        <p className="text-xs text-gray-500 mt-0.5">看到通知点一下，马上安排处理</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <div className="w-6 h-6 rounded-full bg-amber-50 flex-shrink-0 flex items-center justify-center mt-0.5">
+                        <span className="text-xs">🔕</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">随时可关闭</p>
+                        <p className="text-xs text-gray-500 mt-0.5">不想用了随时可以关掉</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <button
+                      onClick={handleAllowClick}
+                      className="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-medium text-sm hover:opacity-90 transition-opacity active:scale-[0.98] shadow-lg shadow-indigo-200"
+                    >
+                      开启通知提醒
+                    </button>
+                    <button
+                      onClick={handleNotNow}
+                      className="w-full py-3 rounded-2xl bg-gray-50 text-gray-500 font-medium text-sm hover:bg-gray-100 transition-colors flex items-center justify-center gap-1"
+                    >
+                      <BellOff size={14} />
+                      下次再说
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}

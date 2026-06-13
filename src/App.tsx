@@ -5,6 +5,12 @@ import { Ingredients } from '@/pages/Ingredients';
 import { Recipes } from '@/pages/Recipes';
 import { Expiring } from '@/pages/Expiring';
 import { BottomNav } from '@/components/BottomNav';
+import { useNotification } from '@/hooks/useNotification';
+
+function NotificationBackground() {
+  useNotification();
+  return null;
+}
 
 function PageWrapper({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -26,6 +32,7 @@ function PageWrapper({ children }: { children: React.ReactNode }) {
 function AppContent() {
   return (
     <div className="relative">
+      <NotificationBackground />
       <PageWrapper>
         <Routes>
           <Route path="/" element={<Dashboard />} />
