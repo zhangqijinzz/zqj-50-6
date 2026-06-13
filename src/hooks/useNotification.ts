@@ -5,6 +5,7 @@ import type { StockIngredientWithStatus } from '@/types';
 const NOTIFICATION_PERMISSION_KEY = 'kitchen-rescue-notification-permission';
 const NOTIFIED_INGREDIENTS_KEY = 'kitchen-rescue-notified-ingredients';
 const NOTIFICATION_PROMPTED_KEY = 'kitchen-rescue-notification-prompted';
+const CACHE_NAME = 'kitchen-rescue-v1';
 
 export type PermissionPromptState = 'idle' | 'prompted' | 'granted' | 'denied' | 'dismissed';
 
@@ -53,7 +54,42 @@ export function savePermissionState(state: PermissionPromptState) {
   localStorage.setItem(NOTIFICATION_PERMISSION_KEY, state);
 }
 
-function sendNotification(item: StockIngredientWithStatus) {
+async function sendViaServiceWorker(title: string, body: string, tag: string) {
+  if (!('serviceWorker' in navigator)) return false;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if (registration && registration.active) {
+      registration.active.postMessage({
+        type: 'SHOW_NOTIFICATION',
+        payload: { title, body, tag },
+      });
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+async function syncStateToServiceWorker() {
+  if (!('caches' in window)) return;
+  try {
+    const state = localStorage.getItem('kitchen-rescue-storage');
+    if (state) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(
+        '/sw-state',
+        new Response(state, {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function sendNotification(item: StockIngredientWithStatus) {
   if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return;
 
   const title =
@@ -69,6 +105,9 @@ function sendNotification(item: StockIngredientWithStatus) {
       : '食材进入紧急状态，尽快安排食用';
 
   const tag = `kitchen-expiry-${item.id}`;
+
+  const sent = await sendViaServiceWorker(title, body, tag);
+  if (sent) return;
 
   try {
     const notification = new Notification(title, {
@@ -95,8 +134,39 @@ function sendNotification(item: StockIngredientWithStatus) {
   }
 }
 
+export async function sendTestNotification(): Promise<boolean> {
+  if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') {
+    return false;
+  }
+
+  const title = '🔔 测试通知：临期提醒正常工作';
+  const body = '示例食材「胡萝卜」还剩 2 天，快安排吃掉它吧～';
+  const tag = 'kitchen-expiry-test';
+
+  const sent = await sendViaServiceWorker(title, body, tag);
+  if (sent) return true;
+
+  try {
+    const n = new Notification(title, {
+      body,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      tag,
+    });
+    n.onclick = () => {
+      window.focus();
+      window.location.href = '/expiring';
+      n.close();
+    };
+    setTimeout(() => n.close(), 8000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function useNotification() {
-  const { getStockByStatus, getStockWithStatus } = useStore();
+  const { getStockByStatus, getStockWithStatus, stockIngredients } = useStore();
   const [permissionState, setPermissionState] = useState<PermissionPromptState>(() =>
     getPermissionState()
   );
@@ -125,6 +195,7 @@ export function useNotification() {
     }
 
     writeNotifiedIds(newNotified);
+    syncStateToServiceWorker();
   }, [getStockByStatus, getStockWithStatus]);
 
   const requestPermission = useCallback(async (): Promise<PermissionPromptState> => {
@@ -142,6 +213,7 @@ export function useNotification() {
       savePermissionState('granted');
       setPermissionState('granted');
       checkAndNotify();
+      syncStateToServiceWorker();
       return 'granted';
     }
     if (Notification.permission === 'denied') {
@@ -156,6 +228,7 @@ export function useNotification() {
         savePermissionState('granted');
         setPermissionState('granted');
         checkAndNotify();
+        syncStateToServiceWorker();
         return 'granted';
       } else {
         savePermissionState('denied');
@@ -191,11 +264,26 @@ export function useNotification() {
     };
     document.addEventListener('visibilitychange', onVisibility);
 
+    const onSWTrigger = () => {
+      checkAndNotify();
+    };
+    window.addEventListener('sw-check-expiry', onSWTrigger);
+
+    const stateInterval = setInterval(syncStateToServiceWorker, 15000);
+
     return () => {
       clearInterval(interval);
+      clearInterval(stateInterval);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('sw-check-expiry', onSWTrigger);
     };
   }, [permissionState, checkAndNotify]);
+
+  useEffect(() => {
+    if (permissionState === 'granted') {
+      syncStateToServiceWorker();
+    }
+  }, [stockIngredients, permissionState]);
 
   return {
     permissionState,
@@ -205,6 +293,8 @@ export function useNotification() {
     shouldShowPrompt: permissionState === 'idle' && !hasPromptedBefore(),
     shouldShowGuideBar: permissionState === 'denied' || permissionState === 'dismissed',
     refreshPermissionState: () => setPermissionState(getPermissionState()),
+    sendTestNotification,
+    syncStateToServiceWorker,
   };
 }
 

@@ -12,10 +12,15 @@ import {
   Bell,
   BellOff,
   Settings,
+  CheckCircle2,
+  Play,
+  Lock,
+  ArrowRight,
+  Globe,
 } from 'lucide-react';
 import type { StockIngredientWithStatus, ExpiryStatus } from '@/types';
-import { useNotification } from '@/hooks/useNotification';
-import { useState } from 'react';
+import { useNotification, sendTestNotification } from '@/hooks/useNotification';
+import { useState, useCallback } from 'react';
 
 const statusConfig: Record<ExpiryStatus, { label: string; chipClass: string; barClass: string; bgClass: string; text: string }> = {
   expired: {
@@ -52,6 +57,9 @@ export function Expiring() {
   const { getStockWithStatus, getStockByStatus, removeStockIngredient, getMatchedRecipes } = useStore();
   const { permissionState, requestPermission, dismissPrompt, shouldShowPrompt, shouldShowGuideBar, refreshPermissionState } = useNotification();
   const [showPromptDialog, setShowPromptDialog] = useState(shouldShowPrompt);
+  const [showGuideDialog, setShowGuideDialog] = useState(false);
+  const [testBtnState, setTestBtnState] = useState<'idle' | 'sending' | 'success'>('idle');
+  const [hideGuideBar, setHideGuideBar] = useState(false);
 
   const allStock = getStockWithStatus();
   const { urgent, warning, fresh, expired } = getStockByStatus();
@@ -73,12 +81,33 @@ export function Expiring() {
     dismissPrompt();
   };
 
-  const handleGuideBarClick = async () => {
+  const handleGuideBarClick = () => {
     if (permissionState === 'dismissed') {
-      await requestPermission();
+      requestPermission();
     } else {
-      refreshPermissionState();
+      setShowGuideDialog(true);
     }
+  };
+
+  const handleTestNotification = useCallback(async () => {
+    if (testBtnState !== 'idle') return;
+    setTestBtnState('sending');
+    const ok = await sendTestNotification();
+    if (ok) {
+      setTestBtnState('success');
+      setTimeout(() => setTestBtnState('idle'), 2500);
+    } else {
+      setTestBtnState('idle');
+    }
+  }, [testBtnState]);
+
+  const handleRefreshCheck = () => {
+    refreshPermissionState();
+    setTimeout(() => {
+      if (Notification.permission === 'granted') {
+        setShowGuideDialog(false);
+      }
+    }, 300);
   };
 
   const renderSection = (title: string, emoji: string, items: StockIngredientWithStatus[], showRecipes = false) => {
@@ -120,24 +149,31 @@ export function Expiring() {
     <div className="min-h-screen pb-28">
       <div className="max-w-lg mx-auto px-4 pt-8">
         <AnimatePresence>
-          {shouldShowGuideBar && (
+          {shouldShowGuideBar && !hideGuideBar && (
             <motion.div
               key="guide-bar"
               initial={{ opacity: 0, y: -20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="mb-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 p-[1.5px]"
+              className="mb-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 p-[1.5px] relative"
             >
+              <button
+                onClick={() => setHideGuideBar(true)}
+                className="absolute -top-2 -right-2 z-10 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="关闭提示"
+              >
+                <span className="text-sm leading-none">×</span>
+              </button>
               <div className="rounded-2xl bg-white px-4 py-3 flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
                   <Bell size={18} className="text-indigo-500" />
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 text-left">
                   <p className="text-sm font-medium text-gray-800 mb-0.5">开启桌面通知，食材快过期时提醒你</p>
                   <p className="text-xs text-gray-500">
                     {permissionState === 'denied'
-                      ? '已被浏览器禁用，点击「去设置」在浏览器中开启通知权限'
-                      : '不打开应用也能收到提醒，再也不怕食材放坏啦'}
+                      ? '已被浏览器禁用，点击右侧按钮查看开启方法'
+                      : '不打开应用也能收到提醒（支持后台运行），再也不怕食材放坏啦'}
                   </p>
                 </div>
                 <button
@@ -167,14 +203,53 @@ export function Expiring() {
               key="granted-bar"
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-100 px-4 py-3 flex items-center gap-3"
+              className="mb-5 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 px-4 py-3"
             >
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                <Bell size={16} className="text-emerald-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-emerald-800">通知已开启</p>
-                <p className="text-xs text-emerald-600/80">食材进入紧急状态时会第一时间提醒你～</p>
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <Bell size={16} className="text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-emerald-800">通知已开启</p>
+                  <p className="text-[11px] text-emerald-600/80">
+                    <span className="inline-flex items-center gap-1">
+                      <Lock size={10} />
+                      建议保持本页在浏览器中打开，后台也会定期检测
+                    </span>
+                  </p>
+                </div>
+                <button
+                  onClick={handleTestNotification}
+                  disabled={testBtnState !== 'idle'}
+                  className={`flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                    testBtnState === 'success'
+                      ? 'bg-emerald-500 text-white'
+                      : testBtnState === 'sending'
+                      ? 'bg-emerald-100 text-emerald-400'
+                      : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 active:scale-95'
+                  }`}
+                >
+                  {testBtnState === 'success' ? (
+                    <>
+                      <CheckCircle2 size={12} />
+                      已发送
+                    </>
+                  ) : testBtnState === 'sending' ? (
+                    <>
+                      <motion.span
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        className="inline-block w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full"
+                      />
+                      发送中
+                    </>
+                  ) : (
+                    <>
+                      <Play size={12} />
+                      测试通知
+                    </>
+                  )}
+                </button>
               </div>
             </motion.div>
           )}
@@ -224,7 +299,7 @@ export function Expiring() {
                     </div>
                     <div className="flex items-start gap-3">
                       <div className="w-6 h-6 rounded-full bg-blue-50 flex-shrink-0 flex items-center justify-center mt-0.5">
-                        <span className="text-xs">🔔</span>
+                        <ArrowRight size={12} className="text-blue-500" />
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-800">点击直达临期页</p>
@@ -233,11 +308,13 @@ export function Expiring() {
                     </div>
                     <div className="flex items-start gap-3">
                       <div className="w-6 h-6 rounded-full bg-amber-50 flex-shrink-0 flex items-center justify-center mt-0.5">
-                        <span className="text-xs">🔕</span>
+                        <Globe size={12} className="text-amber-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-gray-800">随时可关闭</p>
-                        <p className="text-xs text-gray-500 mt-0.5">不想用了随时可以关掉</p>
+                        <p className="text-sm font-medium text-gray-800">后台持续检测</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          保持标签页打开，即使切到其他窗口也能收到
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -255,6 +332,95 @@ export function Expiring() {
                     >
                       <BellOff size={14} />
                       下次再说
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showGuideDialog && (
+            <motion.div
+              key="guide-dialog-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center px-6 bg-black/40 backdrop-blur-sm"
+              onClick={() => setShowGuideDialog(false)}
+            >
+              <motion.div
+                key="guide-dialog"
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="relative bg-gradient-to-br from-orange-400 via-amber-400 to-yellow-400 px-6 pt-7 pb-8 text-center">
+                  <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-white/25 backdrop-blur-sm flex items-center justify-center">
+                    <Settings size={32} className="text-white" />
+                  </div>
+                  <h3 className="font-display text-xl text-white mb-1">如何开启通知权限</h3>
+                  <p className="text-xs text-white/85">
+                    权限已被浏览器禁用，请按以下步骤开启
+                  </p>
+                </div>
+
+                <div className="px-6 py-5 space-y-4">
+                  <div className="space-y-3">
+                    <GuideStep
+                      number={1}
+                      title="点击地址栏左侧的锁图标"
+                      desc="在浏览器地址栏最左边，找到 🔒 或 ⓘ 形状的图标并点击"
+                      emoji="🔒"
+                    />
+                    <GuideStep
+                      number={2}
+                      title="找到「通知」选项"
+                      desc="在弹出的面板中，找到「通知」设置项"
+                      emoji="📋"
+                    />
+                    <GuideStep
+                      number={3}
+                      title="切换为「允许」"
+                      desc="将通知权限从「阻止」改为「允许」，然后关闭面板"
+                      emoji="✅"
+                    />
+                    <GuideStep
+                      number={4}
+                      title="刷新页面完成设置"
+                      desc="点击下方按钮检查权限是否已成功开启"
+                      emoji="🔄"
+                    />
+                  </div>
+
+                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5 mb-1">
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      <span className="font-medium">💡 小贴士：</span>
+                      如果找不到锁图标，也可以按键盘{' '}
+                      <kbd className="inline-block px-1.5 py-0.5 rounded bg-amber-200/60 text-amber-800 font-mono text-[10px] mx-0.5">
+                        ⌘ ,
+                      </kbd>{' '}
+                      打开浏览器设置，搜索「通知」找到本站进行修改。
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-1">
+                    <button
+                      onClick={handleRefreshCheck}
+                      className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium text-sm hover:opacity-90 transition-opacity active:scale-[0.98] shadow-lg shadow-amber-200 flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 size={15} />
+                      我已开启，检查一下
+                    </button>
+                    <button
+                      onClick={() => setShowGuideDialog(false)}
+                      className="w-full py-3 rounded-2xl bg-gray-50 text-gray-500 font-medium text-sm hover:bg-gray-100 transition-colors"
+                    >
+                      稍后再说
                     </button>
                   </div>
                 </div>
@@ -394,6 +560,35 @@ export function Expiring() {
             </motion.div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function GuideStep({
+  number,
+  title,
+  desc,
+  emoji,
+}: {
+  number: number;
+  title: string;
+  desc: string;
+  emoji: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex-shrink-0 flex flex-col items-center">
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-amber-200">
+          {number}
+        </div>
+      </div>
+      <div className="flex-1 pt-1">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <span className="text-sm">{emoji}</span>
+          <p className="text-sm font-medium text-gray-800 leading-tight">{title}</p>
+        </div>
+        <p className="text-xs text-gray-500 leading-relaxed pl-5">{desc}</p>
       </div>
     </div>
   );
